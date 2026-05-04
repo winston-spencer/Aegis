@@ -7,6 +7,7 @@ set RUN_FILTER=all
 set RUNS_EXECUTED=
 set DEVICE=
 set ADB=adb
+set RESTORE_SNAPSHOT=0
 
 :: Parse arguments
 :parse_args
@@ -28,15 +29,37 @@ if "%~1"=="--list-devices" (
     adb devices -l
     exit /b 0
 )
+if "%~1"=="--list-snapshots" (
+    if "!DEVICE!"=="" (
+        echo Error: --list-snapshots requires --device ^<serial^>
+        echo Use --list-devices to find your emulator serial.
+        exit /b 1
+    )
+    echo Snapshots for device !DEVICE!:
+    adb -s !DEVICE! emu avd snapshot list
+    exit /b 0
+)
+if "%~1"=="--restore-snapshot" (
+    set RESTORE_SNAPSHOT=1
+    shift
+    goto :parse_args
+)
 if "%~1"=="--help" (
-    echo Usage: %~nx0 [--run ^<N^|all^>] [--device ^<serial^>] [--list-devices]
+    echo Usage: %~nx0 [OPTIONS]
     echo.
     echo Options:
     echo   --run ^<N^>          Run only iteration N (1-10)
     echo   --run all          Run all 10 iterations (default)
     echo   --device ^<serial^>  Target a specific device (use --list-devices to find serial)
     echo   --list-devices     List all connected devices and exit
+    echo   --list-snapshots   List snapshots for the device (requires --device)
+    echo   --restore-snapshot Restore the most recent snapshot before running tests
     echo   --help             Show this help message
+    echo.
+    echo Examples:
+    echo   %~nx0 --list-devices
+    echo   %~nx0 --device emulator-5554 --list-snapshots
+    echo   %~nx0 --device emulator-5554 --restore-snapshot --run 1
     exit /b 0
 )
 echo Unknown option: %~1
@@ -47,6 +70,34 @@ exit /b 1
 :: Set up adb command with device targeting
 if not "%DEVICE%"=="" (
     set ADB=adb -s %DEVICE%
+)
+
+:: Restore most recent snapshot if requested
+if "%RESTORE_SNAPSHOT%"=="1" (
+    if "%DEVICE%"=="" (
+        echo Error: --restore-snapshot requires --device ^<serial^>
+        exit /b 1
+    )
+    echo Fetching snapshot list for %DEVICE%...
+
+    set "LATEST_SNAPSHOT="
+    for /f "tokens=1 delims= " %%a in ('!ADB! emu avd snapshot list 2^>^&1 ^| findstr /v /i "OK Snapshot List"') do (
+        if not "%%a"=="" set "LATEST_SNAPSHOT=%%a"
+    )
+
+    if "!LATEST_SNAPSHOT!"=="" (
+        echo Error: No snapshots found for device %DEVICE%
+        exit /b 1
+    )
+
+    echo Restoring snapshot: !LATEST_SNAPSHOT!
+    !ADB! emu avd snapshot load "!LATEST_SNAPSHOT!"
+    if %ERRORLEVEL% neq 0 (
+        echo Snapshot restore failed. Exiting.
+        exit /b 1
+    )
+    echo Snapshot restored. Waiting for device...
+    timeout /t 3 /nobreak >nul
 )
 
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
@@ -151,7 +202,9 @@ echo Description: !MONKEY_DESC! >> "%LOG_FILE%"
 echo Started: %DATE% %TIME% >> "%LOG_FILE%"
 echo ======================================== >> "%LOG_FILE%"
 
-!ADB! shell monkey !MONKEY_ARGS! >> "%LOG_FILE%" 2>&1
+:: Run monkey with output to both console and log file
+set "FULL_CMD=!ADB! shell monkey !MONKEY_ARGS!"
+powershell -NoProfile -Command "cmd /c '!FULL_CMD! 2>&1' | ForEach-Object { Write-Host $_; $_ | Out-File -Append -Encoding ascii '!LOG_FILE!' }"
 
 findstr /c:"Monkey finished" "%LOG_FILE%" >nul 2>&1
 if %ERRORLEVEL% equ 0 (

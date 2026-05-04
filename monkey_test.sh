@@ -5,6 +5,7 @@ LOG_DIR="monkey_logs"
 RUN_FILTER="all"
 DEVICE=""
 ADB="adb"
+RESTORE_SNAPSHOT=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -22,15 +23,36 @@ while [[ $# -gt 0 ]]; do
             adb devices -l
             exit 0
             ;;
+        --list-snapshots)
+            if [ -z "$DEVICE" ]; then
+                echo "Error: --list-snapshots requires --device <serial>"
+                echo "Use --list-devices to find your emulator serial."
+                exit 1
+            fi
+            echo "Snapshots for device $DEVICE:"
+            adb -s "$DEVICE" emu avd snapshot list
+            exit 0
+            ;;
+        --restore-snapshot)
+            RESTORE_SNAPSHOT=true
+            shift
+            ;;
         --help)
-            echo "Usage: $0 [--run <N|all>] [--device <serial>] [--list-devices]"
+            echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
             echo "  --run <N>          Run only iteration N (1-10)"
             echo "  --run all          Run all 10 iterations (default)"
             echo "  --device <serial>  Target a specific device (use --list-devices to find serial)"
             echo "  --list-devices     List all connected devices and exit"
+            echo "  --list-snapshots   List snapshots for the device (requires --device)"
+            echo "  --restore-snapshot Restore the most recent snapshot before running tests"
             echo "  --help             Show this help message"
+            echo ""
+            echo "Examples:"
+            echo "  $0 --list-devices"
+            echo "  $0 --device emulator-5554 --list-snapshots"
+            echo "  $0 --device emulator-5554 --restore-snapshot --run 1"
             exit 0
             ;;
         *)
@@ -44,6 +66,34 @@ done
 # Set up adb command with device targeting
 if [ -n "$DEVICE" ]; then
     ADB="adb -s $DEVICE"
+fi
+
+# Restore most recent snapshot if requested
+if [ "$RESTORE_SNAPSHOT" = true ]; then
+    if [ -z "$DEVICE" ]; then
+        echo "Error: --restore-snapshot requires --device <serial>"
+        exit 1
+    fi
+    echo "Fetching snapshot list for $DEVICE..."
+    SNAPSHOT_LIST=$($ADB emu avd snapshot list 2>&1)
+    echo "$SNAPSHOT_LIST"
+
+    # Parse the last snapshot name (skip header/OK lines)
+    LATEST_SNAPSHOT=$(echo "$SNAPSHOT_LIST" | grep -v -E "^OK$|^$|Snapshot|List" | tail -1 | awk '{print $1}')
+
+    if [ -z "$LATEST_SNAPSHOT" ]; then
+        echo "Error: No snapshots found for device $DEVICE"
+        exit 1
+    fi
+
+    echo "Restoring snapshot: $LATEST_SNAPSHOT"
+    $ADB emu avd snapshot load "$LATEST_SNAPSHOT"
+    if [ $? -ne 0 ]; then
+        echo "Snapshot restore failed. Exiting."
+        exit 1
+    fi
+    echo "Snapshot restored. Waiting for device..."
+    sleep 3
 fi
 
 mkdir -p "$LOG_DIR"
@@ -123,7 +173,7 @@ run_monkey() {
     echo "Started: $(date)" >> "$log_file"
     echo "========================================" >> "$log_file"
 
-    $ADB shell monkey $args >> "$log_file" 2>&1
+    $ADB shell monkey $args 2>&1 | tee -a "$log_file"
 
     if grep -q "Monkey finished" "$log_file"; then
         echo "  PASSED - Log: $log_file"
