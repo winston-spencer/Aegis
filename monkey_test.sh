@@ -3,6 +3,8 @@
 PACKAGE="com.beemdevelopment.aegis.debug"
 LOG_DIR="monkey_logs"
 RUN_FILTER="all"
+DEVICE=""
+ADB="adb"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -11,13 +13,24 @@ while [[ $# -gt 0 ]]; do
             RUN_FILTER="$2"
             shift 2
             ;;
+        --device)
+            DEVICE="$2"
+            shift 2
+            ;;
+        --list-devices)
+            echo "Connected devices:"
+            adb devices -l
+            exit 0
+            ;;
         --help)
-            echo "Usage: $0 [--run <N|all>]"
+            echo "Usage: $0 [--run <N|all>] [--device <serial>] [--list-devices]"
             echo ""
             echo "Options:"
-            echo "  --run <N>    Run only iteration N (1-10)"
-            echo "  --run all    Run all 10 iterations (default)"
-            echo "  --help       Show this help message"
+            echo "  --run <N>          Run only iteration N (1-10)"
+            echo "  --run all          Run all 10 iterations (default)"
+            echo "  --device <serial>  Target a specific device (use --list-devices to find serial)"
+            echo "  --list-devices     List all connected devices and exit"
+            echo "  --help             Show this help message"
             exit 0
             ;;
         *)
@@ -27,6 +40,11 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Set up adb command with device targeting
+if [ -n "$DEVICE" ]; then
+    ADB="adb -s $DEVICE"
+fi
 
 mkdir -p "$LOG_DIR"
 
@@ -39,18 +57,23 @@ fi
 echo "Build complete."
 
 echo "Installing debug APK..."
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+echo "  Using: $ADB install -r app/build/outputs/apk/debug/app-debug.apk"
+$ADB install -r app/build/outputs/apk/debug/app-debug.apk
 if [ $? -ne 0 ]; then
     echo "Install failed. Exiting."
+    echo "Hint: use --list-devices to see connected devices, then --device <serial> to target one."
     exit 1
 fi
 echo "Install complete."
 
 echo "Launching app..."
-adb shell am start -n com.beemdevelopment.aegis.debug/com.beemdevelopment.aegis.ui.MainActivity
+$ADB shell am start -n com.beemdevelopment.aegis.debug/com.beemdevelopment.aegis.ui.MainActivity
 sleep 2
 
 echo "Starting Monkey Test Suite for $PACKAGE"
+if [ -n "$DEVICE" ]; then
+    echo "Target device: $DEVICE"
+fi
 echo "Logs will be saved to $LOG_DIR/"
 echo "========================================"
 
@@ -90,7 +113,7 @@ run_monkey() {
     local description="${DESCRIPTIONS[$idx]}"
     local args="${MONKEY_ARGS[$idx]}"
     local log_file="$LOG_DIR/monkey_run${run_num}.txt"
-    local cmd="adb shell monkey $args"
+    local cmd="$ADB shell monkey $args"
 
     echo "[$run_num/$TOTAL] $description"
     echo "  Command: $cmd"
@@ -100,7 +123,7 @@ run_monkey() {
     echo "Started: $(date)" >> "$log_file"
     echo "========================================" >> "$log_file"
 
-    adb shell monkey $args >> "$log_file" 2>&1
+    $ADB shell monkey $args >> "$log_file" 2>&1
 
     if grep -q "Monkey finished" "$log_file"; then
         echo "  PASSED - Log: $log_file"

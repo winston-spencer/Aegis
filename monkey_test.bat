@@ -5,6 +5,8 @@ set PACKAGE=com.beemdevelopment.aegis.debug
 set LOG_DIR=monkey_logs
 set RUN_FILTER=all
 set RUNS_EXECUTED=
+set DEVICE=
+set ADB=adb
 
 :: Parse arguments
 :parse_args
@@ -15,19 +17,37 @@ if "%~1"=="--run" (
     shift
     goto :parse_args
 )
+if "%~1"=="--device" (
+    set DEVICE=%~2
+    shift
+    shift
+    goto :parse_args
+)
+if "%~1"=="--list-devices" (
+    echo Connected devices:
+    adb devices -l
+    exit /b 0
+)
 if "%~1"=="--help" (
-    echo Usage: %~nx0 [--run ^<N^|all^>]
+    echo Usage: %~nx0 [--run ^<N^|all^>] [--device ^<serial^>] [--list-devices]
     echo.
     echo Options:
-    echo   --run ^<N^>    Run only iteration N (1-10)
-    echo   --run all    Run all 10 iterations (default)
-    echo   --help       Show this help message
+    echo   --run ^<N^>          Run only iteration N (1-10)
+    echo   --run all          Run all 10 iterations (default)
+    echo   --device ^<serial^>  Target a specific device (use --list-devices to find serial)
+    echo   --list-devices     List all connected devices and exit
+    echo   --help             Show this help message
     exit /b 0
 )
 echo Unknown option: %~1
 echo Use --help for usage information.
 exit /b 1
 :done_args
+
+:: Set up adb command with device targeting
+if not "%DEVICE%"=="" (
+    set ADB=adb -s %DEVICE%
+)
 
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 
@@ -40,18 +60,23 @@ if %ERRORLEVEL% neq 0 (
 echo Build complete.
 
 echo Installing debug APK...
-adb install -r app\build\outputs\apk\debug\app-debug.apk
+echo   Using: !ADB! install -r app\build\outputs\apk\debug\app-debug.apk
+!ADB! install -r app\build\outputs\apk\debug\app-debug.apk
 if %ERRORLEVEL% neq 0 (
     echo Install failed. Exiting.
+    echo Hint: use --list-devices to see connected devices, then --device ^<serial^> to target one.
     exit /b 1
 )
 echo Install complete.
 
 echo Launching app...
-adb shell am start -n com.beemdevelopment.aegis.debug/com.beemdevelopment.aegis.ui.MainActivity
+!ADB! shell am start -n com.beemdevelopment.aegis.debug/com.beemdevelopment.aegis.ui.MainActivity
 timeout /t 2 /nobreak >nul
 
 echo Starting Monkey Test Suite for %PACKAGE%
+if not "%DEVICE%"=="" (
+    echo Target device: %DEVICE%
+)
 echo Logs will be saved to %LOG_DIR%\
 echo ========================================
 
@@ -119,14 +144,14 @@ set RUN_NUM=%1
 set LOG_FILE=%LOG_DIR%\monkey_run%RUN_NUM%.txt
 
 echo [%RUN_NUM%/%TOTAL%] !MONKEY_DESC!
-echo   Command: adb shell monkey !MONKEY_ARGS!
+echo   Command: !ADB! shell monkey !MONKEY_ARGS!
 
-echo Command: adb shell monkey !MONKEY_ARGS! > "%LOG_FILE%"
+echo Command: !ADB! shell monkey !MONKEY_ARGS! > "%LOG_FILE%"
 echo Description: !MONKEY_DESC! >> "%LOG_FILE%"
 echo Started: %DATE% %TIME% >> "%LOG_FILE%"
 echo ======================================== >> "%LOG_FILE%"
 
-adb shell monkey !MONKEY_ARGS! >> "%LOG_FILE%" 2>&1
+!ADB! shell monkey !MONKEY_ARGS! >> "%LOG_FILE%" 2>&1
 
 findstr /c:"Monkey finished" "%LOG_FILE%" >nul 2>&1
 if %ERRORLEVEL% equ 0 (
