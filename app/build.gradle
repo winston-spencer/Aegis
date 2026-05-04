@@ -94,9 +94,6 @@ android {
     }
 
     // Required to make the APK reproducible
-    aaptOptions {
-        cruncherEnabled = false
-    }
     defaultConfig {
         vectorDrawables.generatedDensities = []
     }

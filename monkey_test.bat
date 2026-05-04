@@ -3,6 +3,31 @@ setlocal enabledelayedexpansion
 
 set PACKAGE=com.beemdevelopment.aegis.debug
 set LOG_DIR=monkey_logs
+set RUN_FILTER=all
+set RUNS_EXECUTED=
+
+:: Parse arguments
+:parse_args
+if "%~1"=="" goto :done_args
+if "%~1"=="--run" (
+    set RUN_FILTER=%~2
+    shift
+    shift
+    goto :parse_args
+)
+if "%~1"=="--help" (
+    echo Usage: %~nx0 [--run ^<N^|all^>]
+    echo.
+    echo Options:
+    echo   --run ^<N^>    Run only iteration N (1-10)
+    echo   --run all    Run all 10 iterations (default)
+    echo   --help       Show this help message
+    exit /b 0
+)
+echo Unknown option: %~1
+echo Use --help for usage information.
+exit /b 1
+:done_args
 
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 
@@ -30,71 +55,86 @@ echo Starting Monkey Test Suite for %PACKAGE%
 echo Logs will be saved to %LOG_DIR%\
 echo ========================================
 
-set MONKEY_ARGS=-p %PACKAGE% -s 1902834875253 --pct-touch 70 --pct-motion 10 -v 5000
-call :run_monkey 1 "Baseline touch-heavy"
+:: Define monkey args for each run
+set "ARGS1=-p %PACKAGE% -s 1902834875253 --pct-touch 70 --pct-motion 10 -v 5000"
+set "DESC1=Baseline touch-heavy"
+set "ARGS2=-p %PACKAGE% -s 2845619073821 --pct-nav 50 --pct-majornav 25 -v 5000"
+set "DESC2=Navigation focused"
+set "ARGS3=-p %PACKAGE% -s 3719284056132 --throttle 200 -v 50000"
+set "DESC3=High event count throttled"
+set "ARGS4=-p %PACKAGE% -s 4521873946201 --ignore-crashes --ignore-timeouts -v 5000"
+set "DESC4=Ignore crashes keep running"
+set "ARGS5=-p %PACKAGE% -s 5634902817345 --pct-syskeys 40 --pct-touch 30 -v 5000"
+set "DESC5=System keys heavy"
+set "ARGS6=-p %PACKAGE% -s 6748291035467 --pct-pinchzoom 30 --pct-touch 40 -v 5000"
+set "DESC6=Pinch zoom focus"
+set "ARGS7=-p %PACKAGE% -s 7856134920578 --pct-touch 50 --pct-motion 20 -v 50000"
+set "DESC7=Fast stress test"
+set "ARGS8=-p %PACKAGE% -s 8923047165689 --pct-appswitch 30 --pct-touch 40 -v 5000"
+set "DESC8=App switch heavy"
+set "ARGS9=-p %PACKAGE% -s 9034158276790 --throttle 500 --pct-touch 60 --pct-nav 20 -v 5000"
+set "DESC9=Slow realistic user simulation"
+set "ARGS10=-p %PACKAGE% -s 1234567890123 --ignore-crashes --ignore-timeouts --ignore-security-exceptions --monitor-native-crashes -v 5000"
+set "DESC10=Full fault tolerance"
 
-set MONKEY_ARGS=-p %PACKAGE% -s 2845619073821 --pct-nav 50 --pct-majornav 25 -v 5000
-call :run_monkey 2 "Navigation focused"
+set TOTAL=10
 
-set MONKEY_ARGS=-p %PACKAGE% -s 3719284056132 --throttle 200 -v 50000
-call :run_monkey 3 "High event count throttled"
-
-set MONKEY_ARGS=-p %PACKAGE% -s 4521873946201 --ignore-crashes --ignore-timeouts -v 5000
-call :run_monkey 4 "Ignore crashes keep running"
-
-set MONKEY_ARGS=-p %PACKAGE% -s 5634902817345 --pct-syskeys 40 --pct-touch 30 -v 5000
-call :run_monkey 5 "System keys heavy"
-
-set MONKEY_ARGS=-p %PACKAGE% -s 6748291035467 --pct-pinchzoom 30 --pct-touch 40 -v 5000
-call :run_monkey 6 "Pinch zoom focus"
-
-set MONKEY_ARGS=-p %PACKAGE% -s 7856134920578 --pct-touch 50 --pct-motion 20 -v 50000
-call :run_monkey 7 "Fast stress test"
-
-set MONKEY_ARGS=-p %PACKAGE% -s 8923047165689 --pct-appswitch 30 --pct-touch 40 -v 5000
-call :run_monkey 8 "App switch heavy"
-
-set MONKEY_ARGS=-p %PACKAGE% -s 9034158276790 --throttle 500 --pct-touch 60 --pct-nav 20 -v 5000
-call :run_monkey 9 "Slow realistic user simulation"
-
-set MONKEY_ARGS=-p %PACKAGE% -s 1234567890123 --ignore-crashes --ignore-timeouts --ignore-security-exceptions --monitor-native-crashes -v 5000
-call :run_monkey 10 "Full fault tolerance"
+if "%RUN_FILTER%"=="all" (
+    for /L %%i in (1,1,%TOTAL%) do (
+        set "MONKEY_ARGS=!ARGS%%i!"
+        set "MONKEY_DESC=!DESC%%i!"
+        call :run_monkey %%i
+    )
+) else (
+    if %RUN_FILTER% geq 1 if %RUN_FILTER% leq %TOTAL% (
+        set "MONKEY_ARGS=!ARGS%RUN_FILTER%!"
+        set "MONKEY_DESC=!DESC%RUN_FILTER%!"
+        call :run_monkey %RUN_FILTER%
+    ) else (
+        echo Error: --run must be between 1 and %TOTAL%, or 'all'
+        exit /b 1
+    )
+)
 
 echo.
 echo ========================================
-echo All runs complete. Results in %LOG_DIR%\
+echo Runs complete. Results in %LOG_DIR%\
 echo.
 echo Summary:
-for /L %%i in (1,1,10) do (
-    set LOG=%LOG_DIR%\monkey_run%%i.txt
+for %%i in (%RUNS_EXECUTED%) do (
+    set "LOG=%LOG_DIR%\monkey_run%%i.txt"
+    set /p CMD=<"!LOG!"
+    set "CMD=!CMD:Command: =!"
     findstr /c:"Monkey finished" "!LOG!" >nul 2>&1
     if !ERRORLEVEL! equ 0 (
-        echo   Run %%i: PASSED
+        echo   Run %%i: PASSED  ^| !CMD!
     ) else (
-        echo   Run %%i: FAILED
+        echo   Run %%i: FAILED  ^| !CMD!
     )
 )
 goto :eof
 
 :run_monkey
 set RUN_NUM=%1
-set DESCRIPTION=%2
 set LOG_FILE=%LOG_DIR%\monkey_run%RUN_NUM%.txt
 
-echo [%RUN_NUM%/10] %DESCRIPTION%...
-echo Command: adb shell monkey %MONKEY_ARGS% > "%LOG_FILE%"
-echo Description: %DESCRIPTION% >> "%LOG_FILE%"
+echo [%RUN_NUM%/%TOTAL%] !MONKEY_DESC!
+echo   Command: adb shell monkey !MONKEY_ARGS!
+
+echo Command: adb shell monkey !MONKEY_ARGS! > "%LOG_FILE%"
+echo Description: !MONKEY_DESC! >> "%LOG_FILE%"
 echo Started: %DATE% %TIME% >> "%LOG_FILE%"
 echo ======================================== >> "%LOG_FILE%"
 
-adb shell monkey %MONKEY_ARGS% >> "%LOG_FILE%" 2>&1
+adb shell monkey !MONKEY_ARGS! >> "%LOG_FILE%" 2>&1
 
 findstr /c:"Monkey finished" "%LOG_FILE%" >nul 2>&1
 if %ERRORLEVEL% equ 0 (
-    echo        PASSED - Log: %LOG_FILE%
+    echo   PASSED - Log: %LOG_FILE%
 ) else (
-    echo        FAILED - Log: %LOG_FILE%
+    echo   FAILED - Log: %LOG_FILE%
 )
 
 echo Finished: %DATE% %TIME% >> "%LOG_FILE%"
+set "RUNS_EXECUTED=!RUNS_EXECUTED! %RUN_NUM%"
 goto :eof
